@@ -1,98 +1,37 @@
-import { DEFAULT_ENGINEERING_STATE, calculateConnectedObjects, dependencyImpact, createRevision } from './universe-core.mjs';
+import { DEFAULT_ENGINEERING_STATE, PARAMETER_DEFINITIONS, calculateConnectedObjects, compareRevisions, dependencyImpact, validateDraft } from './universe-core.mjs';
+import { appendRevision, loadStore, rollbackRevision, saveStore } from './persistence.mjs';
 
-const $ = id => document.getElementById(id);
-const REGIONS = [
-  ['World Explorer', '◎'], ['Command Center', '⌁'], ['Product Lab', '◈'], ['Engineering Studio', '◇'],
-  ['Production Center', '▦'], ['Client Center', '♧'], ['Fridge Network', '▥'], ['Logistics Center', '↗'],
-  ['Memory Center', '◫'], ['Intelligence Center', '✦'], ['Developer Studio', '⌘'],
-];
-const STORAGE = 'onda-universe-engine-alpha';
-const form = $('parameter-form');
-let saved = {};
-try { saved = JSON.parse(localStorage.getItem(STORAGE) || '{}'); } catch { saved = {}; }
-let state = { ...DEFAULT_ENGINEERING_STATE, ...(saved.state || {}) };
-let previous = { ...state };
-let revisions = Array.isArray(saved.revisions) ? saved.revisions : [];
+const $ = id => document.getElementById(id), element = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
+const REGIONS = [['World Explorer','◎'],['Command Center','⌁'],['Product Lab','◈'],['Engineering Studio','◇'],['Production Center','▦'],['Client Center','♧'],['Fridge Network','▥'],['Logistics Center','↗'],['Memory Center','◫'],['Intelligence Center','✦'],['Developer Studio','⌘']];
+const form = $('parameter-form'), loaded = loadStore(); let store = loaded.store, draft = { ...store.validatedState }, lastValidResult = calculateConnectedObjects(store.validatedState), world;
 
-function toast(message) {
-  $('toast').textContent = message;
-  $('toast').classList.add('show');
-  clearTimeout(toast.timer);
-  toast.timer = setTimeout(() => $('toast').classList.remove('show'), 2200);
-}
-function persist() { localStorage.setItem(STORAGE, JSON.stringify({ state, revisions: revisions.slice(-20) })); }
-function readForm() { return Object.fromEntries([...new FormData(form)].map(([key, value]) => [key, Number(value)])); }
-function writeForm(value) { Object.entries(value).forEach(([key, val]) => { if (form.elements[key]) form.elements[key].value = val; }); }
+function toast(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').classList.remove('show'), 2600); }
+function readForm() { const output = {}; for (const key of Object.keys(PARAMETER_DEFINITIONS)) output[key] = form.elements[key]?.value ?? ''; return output; }
+function writeForm(value) { Object.entries(value).forEach(([key,val]) => { if (form.elements[key]) form.elements[key].value = val; }); }
+function commitStore(next) { store = next; const outcome = saveStore(store); $('storage-status').textContent = outcome.ok ? 'Saved in this browser' : outcome.error; $('storage-status').classList.toggle('error', !outcome.ok); if (!outcome.ok) toast(outcome.error); }
 
-function drawTray(result) {
-  const canvas = $('tray-canvas'), ratio = Math.min(devicePixelRatio, 2), width = canvas.clientWidth, height = canvas.clientHeight;
-  canvas.width = width * ratio; canvas.height = height * ratio;
-  const ctx = canvas.getContext('2d'); ctx.scale(ratio, ratio); ctx.clearRect(0, 0, width, height);
-  const pad = 34, scale = Math.min((width - pad * 2) / state.shelfWidth, (height - pad * 2) / state.shelfDepth);
-  const ox = (width - state.shelfWidth * scale) / 2, oy = (height - state.shelfDepth * scale) / 2;
-  ctx.strokeStyle = '#648aa2'; ctx.lineWidth = 1.5; ctx.strokeRect(ox, oy, state.shelfWidth * scale, state.shelfDepth * scale);
-  ctx.fillStyle = '#65c7ec12'; ctx.fillRect(ox, oy, state.shelfWidth * scale, state.shelfDepth * scale);
-  const trayX = ox + result.edgeClearanceX * scale, trayY = oy + result.edgeClearanceZ * scale;
-  ctx.strokeStyle = '#ffe629'; ctx.setLineDash([5, 4]); ctx.strokeRect(trayX, trayY, result.trayWidth * scale, result.trayDepth * scale); ctx.setLineDash([]);
-  for (let row = 0; row < result.rows; row++) for (let col = 0; col < result.columns; col++) {
-    const x = trayX + (col * (state.cupDiameter + state.gap) + state.cupDiameter / 2) * scale;
-    const y = trayY + (row * (state.cupDiameter + state.gap) + state.cupDiameter / 2) * scale;
-    const gradient = ctx.createRadialGradient(x - 4, y - 5, 2, x, y, state.cupDiameter * scale / 2);
-    gradient.addColorStop(0, '#fff5ce'); gradient.addColorStop(.55, '#d99b3f'); gradient.addColorStop(1, '#57351f');
-    ctx.fillStyle = gradient; ctx.beginPath(); ctx.arc(x, y, state.cupDiameter * scale / 2 - 2, 0, Math.PI * 2); ctx.fill();
-    ctx.strokeStyle = '#ffe8a8aa'; ctx.stroke();
-  }
-  ctx.fillStyle = '#91a8b8'; ctx.font = '10px ui-monospace'; ctx.fillText(`${state.shelfWidth} mm`, ox + 4, oy - 10);
+function drawTray(result, parameters) {
+  const canvas=$('tray-canvas'),ratio=Math.min(devicePixelRatio||1,2),width=Math.max(1,canvas.clientWidth),height=Math.max(1,canvas.clientHeight); canvas.width=Math.floor(width*ratio);canvas.height=Math.floor(height*ratio);
+  const ctx=canvas.getContext('2d');ctx.setTransform(ratio,0,0,ratio,0,0);ctx.clearRect(0,0,width,height);const pad=34,scale=Math.max(.01,Math.min((width-pad*2)/parameters.shelfWidth,(height-pad*2)/parameters.shelfDepth));const ox=(width-parameters.shelfWidth*scale)/2,oy=(height-parameters.shelfDepth*scale)/2;
+  ctx.strokeStyle='#648aa2';ctx.lineWidth=1.5;ctx.strokeRect(ox,oy,parameters.shelfWidth*scale,parameters.shelfDepth*scale);ctx.fillStyle='#65c7ec12';ctx.fillRect(ox,oy,parameters.shelfWidth*scale,parameters.shelfDepth*scale);
+  if (!result.cupsPerShelf) { ctx.fillStyle='#ffbe69';ctx.textAlign='center';ctx.font='12px system-ui';ctx.fillText('NO VALID PACKING FIT',width/2,height/2);return; }
+  const trayX=ox+result.edgeClearanceX*scale,trayY=oy+result.edgeClearanceZ*scale;ctx.strokeStyle='#ffe629';ctx.setLineDash([5,4]);ctx.strokeRect(trayX,trayY,result.trayWidth*scale,result.trayDepth*scale);ctx.setLineDash([]);
+  const radius=Math.max(1,parameters.cupDiameter*scale/2-2);for(let row=0;row<result.rows;row++)for(let col=0;col<result.columns;col++){const x=trayX+(col*(parameters.cupDiameter+parameters.gap)+parameters.cupDiameter/2)*scale,y=trayY+(row*(parameters.cupDiameter+parameters.gap)+parameters.cupDiameter/2)*scale;const gradient=ctx.createRadialGradient(x-4,y-5,2,x,y,radius);gradient.addColorStop(0,'#fff5ce');gradient.addColorStop(.55,'#d99b3f');gradient.addColorStop(1,'#57351f');ctx.fillStyle=gradient;ctx.beginPath();ctx.arc(x,y,radius,0,Math.PI*2);ctx.fill();ctx.strokeStyle='#ffe8a8aa';ctx.stroke();}
 }
 
-function renderHistory() {
-  $('history').replaceChildren(...revisions.slice().reverse().map((revision, index) => {
-    const li = document.createElement('li');
-    li.innerHTML = `<b>v${revisions.length - index}</b><span>${new Date(revision.createdAt).toLocaleString()} · ${revision.impact.changed.join(', ') || 'baseline'}</span><strong>${revision.result.totalCapacity} cups</strong>`;
-    return li;
-  }));
-  if (!revisions.length) $('history').innerHTML = '<li><span>No saved revisions yet</span></li>';
-}
+function renderImpact(impact) { const host=$('impact-graph');host.replaceChildren();if(!impact.changed.length){host.append(element('span','Edit a parameter to trace impact','node'));return;} for(const [index,name] of [...impact.changed,...impact.affected].entries()){if(index===impact.changed.length)host.append(element('span','→','arrow'));host.append(element('span',name,'node changed'));} }
+function constraintRow(label,status){const row=element('span');row.append(element('span',label));row.append(element('b',status.toUpperCase()));row.className=status==='pass'?'pass':status==='fail'?'fail':'';return row;}
+function renderResult(result,parameters,impact){lastValidResult=result;$('capacity').textContent=result.totalCapacity;$('grid-result').textContent=`${result.columns} × ${result.rows}`;$('shelf-result').textContent=`${result.cupsPerShelf} cups`;$('mass-result').textContent=`${result.estimatedMassKg.toFixed(3)} kg`;$('cost-result').textContent=`$${result.estimatedMaterialCost.toFixed(2)}`;$('tray-dimensions').textContent=`SOLID PLATE ${result.trayWidth} × ${result.trayDepth} mm`;$('clearance').textContent=`EDGE ${result.edgeClearanceX.toFixed(1)} / ${result.edgeClearanceZ.toFixed(1)} mm`;$('formula').textContent=result.formula;renderImpact(impact);drawTray(result,parameters);const list=$('constraint-list');list.replaceChildren(constraintRow('Packing calculation',result.constraints.packing),constraintRow('Height clearance',result.constraints.height),constraintRow('Airflow & tolerance','unverified'),constraintRow('Physical validation','unverified'));}
 
-function render() {
-  try {
-    const next = readForm(), result = calculateConnectedObjects(next), impact = dependencyImpact(previous, next);
-    state = next; $('form-error').textContent = '';
-    $('capacity').textContent = result.totalCapacity; $('grid-result').textContent = `${result.columns} × ${result.rows}`;
-    $('shelf-result').textContent = `${result.cupsPerShelf} cups`; $('mass-result').textContent = `${result.estimatedMassKg.toFixed(2)} kg`;
-    $('cost-result').textContent = `$${result.estimatedMaterialCost.toFixed(2)}`; $('tray-dimensions').textContent = `TRAY ${result.trayWidth} × ${result.trayDepth} mm`;
-    $('clearance').textContent = `EDGE ${result.edgeClearanceX.toFixed(1)} / ${result.edgeClearanceZ.toFixed(1)} mm`; $('formula').textContent = result.formula;
-    const source = [...impact.changed.map(name => `<span class="node changed">${name}</span>`), '<span class="arrow">→</span>', ...impact.affected.map(name => `<span class="node changed">${name}</span>`)];
-    $('impact-graph').innerHTML = source.length > 1 ? source.join('') : '<span class="node">Edit a parameter to trace impact</span>';
-    drawTray(result); persist();
-  } catch (error) { $('form-error').textContent = error.message; }
-}
+function renderDraft(){const validation=validateDraft(readForm());$('save-revision').disabled=!validation.valid;$('draft-status').textContent=validation.valid?'Valid draft · results previewed, not saved':'Invalid draft · showing last valid result';$('draft-status').className=validation.valid?'valid':'error';document.querySelectorAll('[aria-invalid]').forEach(input=>input.removeAttribute('aria-invalid'));if(!validation.valid){$('form-error').textContent=validation.errors.map(error=>error.message).join('. ');validation.errors.forEach(error=>form.elements[error.key]?.setAttribute('aria-invalid','true'));return;}$('form-error').textContent='';draft=validation.value;renderResult(calculateConnectedObjects(draft),draft,dependencyImpact(store.validatedState,draft));}
 
-function selectRegion(name) {
-  $('current-region').textContent = name;
-  document.querySelectorAll('#region-nav button').forEach(button => button.classList.toggle('active', button.dataset.region === name));
-  if (name === 'Engineering Studio') $('workspace').scrollIntoView({ behavior: 'smooth' });
-  else if (name !== 'World Explorer') toast(`${name}: workspace module planned, not connected yet`);
-}
+function renderHistory(){const host=$('history');host.replaceChildren();if(!store.revisions.length){const item=element('li');item.append(element('span','No saved revisions yet'));host.append(item);return;}store.revisions.slice().reverse().forEach((revision,index)=>{const item=element('li'),version=store.revisions.length-index;item.append(element('b',`v${version}`));item.append(element('span',`${new Date(revision.createdAt).toLocaleString()} · ${revision.operation}`));item.append(element('strong',`${revision.snapshot.derived.totalCapacity} cups`));const rollback=element('button','Restore');rollback.type='button';rollback.onclick=()=>{commitStore(rollbackRevision(store,revision.id));draft={...store.validatedState};writeForm(draft);renderDraft();renderHistory();toast(`Restored v${version} as a new revision`);};item.append(rollback);host.append(item);});if(store.revisions.length>1){const changes=compareRevisions(store.revisions.at(-2),store.revisions.at(-1));$('revision-comparison').textContent=changes.length?`Latest change: ${changes.map(change=>`${change.key} ${change.from} → ${change.to}`).join(', ')}`:'Latest revisions have identical parameters';}else $('revision-comparison').textContent='Save another revision to compare changes';}
 
-REGIONS.forEach(([name, icon]) => {
-  const button = document.createElement('button'); button.dataset.region = name; button.innerHTML = `<span>${icon}</span>${name.replace(' Center', '')}`;
-  button.onclick = () => selectRegion(name); $('region-nav').append(button);
-  const fallback = button.cloneNode(true); fallback.onclick = () => selectRegion(name); $('fallback-regions').append(fallback);
-});
-selectRegion('World Explorer'); writeForm(state); form.addEventListener('input', render); window.addEventListener('resize', render);
-$('restore-defaults').onclick = () => { previous = { ...state }; state = { ...DEFAULT_ENGINEERING_STATE }; writeForm(state); render(); toast('Illustrative demo parameters restored'); };
-$('save-revision').onclick = () => { try { const result = calculateConnectedObjects(state); revisions.push(createRevision(state, result, previous)); previous = { ...state }; persist(); renderHistory(); render(); toast(`Revision v${revisions.length} saved locally`); } catch (error) { $('form-error').textContent = error.message; } };
-$('enter-engineering').onclick = () => selectRegion('Engineering Studio');
-$('command-button').onclick = () => toast('Command palette is planned, not connected yet');
-renderHistory(); render();
+function selectRegion(name){$('current-region').textContent=name;document.querySelectorAll('#region-nav button').forEach(button=>button.classList.toggle('active',button.dataset.region===name));if(name==='Engineering Studio'){$('workspace').scrollIntoView({behavior:matchMedia('(prefers-reduced-motion: reduce)').matches?'auto':'smooth'});$('workspace-title').focus({preventScroll:true});}else if(name!=='World Explorer')toast(`${name}: planned workspace — unavailable in Mission 002`);}
+REGIONS.forEach(([name,icon])=>{const button=element('button');button.dataset.region=name;button.append(element('span',icon));button.append(document.createTextNode(name.replace(' Center','')));button.onclick=()=>selectRegion(name);$('region-nav').append(button);const fallback=button.cloneNode(true);fallback.onclick=()=>selectRegion(name);$('fallback-regions').append(fallback);});
+writeForm(draft);form.addEventListener('input',renderDraft);$('restore-defaults').onclick=()=>{draft={...DEFAULT_ENGINEERING_STATE};writeForm(draft);renderDraft();toast('Illustrative demo draft restored — save to create a revision');};$('save-revision').onclick=()=>{const validation=validateDraft(readForm());if(!validation.valid)return;commitStore(appendRevision(store,validation.value,store.validatedState));draft={...store.validatedState};renderDraft();renderHistory();toast(`Revision v${store.revisions.length} saved locally`);};$('enter-engineering').onclick=()=>selectRegion('Engineering Studio');$('command-button').disabled=true;$('command-button').title='Command palette is planned and unavailable';window.addEventListener('resize',()=>drawTray(lastValidResult,draft),{passive:true});
+if(loaded.error){$('storage-status').textContent=loaded.error;$('storage-status').classList.add('error');toast(loaded.error);}renderDraft();renderHistory();selectRegion('World Explorer');
 
-try {
-  const { mountWorld } = await import('./world.mjs');
-  const world = mountWorld($('world3d'), selectRegion);
-  $('reset-camera').onclick = world.reset;
-  $('render-status').textContent = 'REAL-TIME 3D · DEMO WORLD';
-} catch (error) {
-  $('world3d').hidden = true; $('world-fallback').hidden = false; $('render-status').textContent = '2D FALLBACK ACTIVE';
-  console.error('3D world unavailable', error);
-}
+const worldHost=$('world3d');worldHost.addEventListener('worldcontextlost',()=>{worldHost.hidden=true;$('world-fallback').hidden=false;$('reset-camera').disabled=true;$('render-status').textContent='3D CONTEXT LOST · 2D FALLBACK';});worldHost.addEventListener('worldcontextrestored',()=>{worldHost.hidden=false;$('world-fallback').hidden=true;$('reset-camera').disabled=false;$('render-status').textContent='REAL-TIME 3D · RESTORED';});
+try{const{mountWorld}=await import('./world.mjs');world=mountWorld(worldHost,selectRegion);$('reset-camera').onclick=world.reset;$('render-status').textContent='REAL-TIME 3D · DEMO WORLD';}catch(error){worldHost.hidden=true;$('world-fallback').hidden=false;$('reset-camera').disabled=true;$('render-status').textContent='2D FALLBACK ACTIVE';console.error('3D world unavailable',error);}
+addEventListener('pagehide',()=>world?.dispose(),{once:true});
