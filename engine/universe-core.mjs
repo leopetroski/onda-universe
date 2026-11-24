@@ -89,7 +89,7 @@ export function calculateConnectedObjects(input) {
     constraints: { packing: fit ? 'pass' : 'fail', height: 'unverified', airflow: 'unverified', tolerance: 'unverified', physicalValidation: 'unverified' },
     provenance: { shelfDimensions: 'illustrative-demo', cupDimensions: 'illustrative-demo', fridgeExterior: 'verified-reference', calculation: 'derived' },
     formula: 'floor((width + gap) / (diameter + gap)) × floor((depth + gap) / (diameter + gap))',
-    formulaVersion: FORMULA_VERSION, fridgeExteriorMm: [435, 475, 500], cupHeight: values.cupHeight,
+    formulaVersion: FORMULA_VERSION, fridgeExteriorMm: [435, 475, 500], cupDiameter: values.cupDiameter, cupHeight: values.cupHeight,
   };
 }
 
