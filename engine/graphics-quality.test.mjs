@@ -1,0 +1,3 @@
+import test from'node:test';import assert from'node:assert/strict';import{recommendQuality,resolveQuality}from'./graphics-quality.mjs';
+test('adaptive quality protects mobile, software and reduced-motion devices',()=>{assert.equal(recommendQuality({width:390,hardwareConcurrency:8}),'low');assert.equal(recommendQuality({width:1200,hardwareConcurrency:8,reducedMotion:true}),'low');assert.equal(recommendQuality({width:1600,hardwareConcurrency:16,softwareRenderer:true}),'low');});
+test('quality profiles return bounded rendering settings',()=>{assert.deepEqual(resolveQuality('high').pixelRatio,1.75);assert.equal(resolveQuality('unknown').pixelRatio,1.25);});

@@ -5,6 +5,7 @@ import { createWorkspaceSystem } from './workspaces.mjs';
 const $ = id => document.getElementById(id), element = (tag, text, className) => { const node = document.createElement(tag); if (text !== undefined) node.textContent = text; if (className) node.className = className; return node; };
 const REGIONS = [['World Explorer','◎'],['Command Center','⌁'],['Product Lab','◈'],['Engineering Studio','◇'],['Production Center','▦'],['Client Center','♧'],['Fridge Network','▥'],['Logistics Center','↗'],['Memory Center','◫'],['Intelligence Center','✦'],['Developer Studio','⌘']];
 const form = $('parameter-form'), loaded = loadStore(); let store = loaded.store, draft = { ...store.validatedState }, lastValidResult = calculateConnectedObjects(store.validatedState), world, workspaceSystem;
+const qualityProfile=$('quality-profile');qualityProfile.value=localStorage.getItem('onda-graphics-quality')||'auto';qualityProfile.onchange=()=>{localStorage.setItem('onda-graphics-quality',qualityProfile.value);location.reload();};
 
 function toast(message) { $('toast').textContent = message; $('toast').classList.add('show'); clearTimeout(toast.timer); toast.timer = setTimeout(() => $('toast').classList.remove('show'), 2600); }
 function readForm() { const output = {}; for (const key of Object.keys(PARAMETER_DEFINITIONS)) output[key] = form.elements[key]?.value ?? ''; return output; }
